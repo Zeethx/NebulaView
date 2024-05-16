@@ -254,6 +254,12 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
         {new: true}
     ).select("-password -refreshToken")
 
+    const oldImageToDelete = user.avatar.split("/").pop()
+
+    if (oldImageToDelete !== "default-avatar.png") {
+        await deleteFromCloudinary(oldImageToDelete)
+    }
+
     return res.status(200)
     .json(
         new apiResponse(200, user, "Avatar has been updated")
@@ -287,6 +293,63 @@ const updateUserCoverImage = asyncHandler(async (req, res) =>{
     )
 })
 
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+    const { username } = req.params
+
+    if (!username?.trim()) {
+        throw new apiError(400, "Username is required")
+    }
+
+    const channel = await User.aggregate([
+        { $match: { username } },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "channel",
+                as: "subscribers"
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscriptions"
+            }
+        },
+        {
+            $addFields: {
+                subscriberCount: { $size: "$subscribers" },
+                subscriptionCount: { $size: "$subscriptions" },
+                isSubscribed: {
+                    $cond: {
+                        if: {$in: [req.user?._id, "$subscribers.subscriber"]},
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },
+        $project: {
+            fullName: 1,
+            username: 1,
+            avatar: 1,
+            coverImage: 1,
+            subscriberCount: 1,
+            subscriptionCount: 1,
+            isSubscribed: 1
+        }
+    ])
+
+    if (!channel?.length) {
+        throw new apiError(404, "Channel not found")
+    }
+
+    return res.status(200).json(
+        new apiResponse(200, channel[0], "Channel profile retrieved successfully")
+    )
+});
 export { 
     registerUser,
     loginUser,
